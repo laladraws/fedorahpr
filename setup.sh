@@ -107,41 +107,60 @@ dnf install -y "${DNF_AMD[@]}"
 log "Drivers AMD instalados"
 
 # ── ROCm (compute GPU AMD — OpenCL, HIP, machine learning) ───────────────────
-# ROCm tiene su propio repositorio oficial para Fedora
-info "Habilitando repositorio ROCm..."
-cat > /etc/yum.repos.d/rocm.repo <<'ROCMREPO'
-[ROCm-latest]
-name=ROCm Latest
-baseurl=https://repo.radeon.com/rocm/rhel9/latest/main
-enabled=1
-priority=50
-gpgcheck=1
-gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-ROCMREPO
-
-dnf makecache --repo=ROCm-latest
+# Fedora 44 incluye ROCm en sus repos oficiales (actualmente 6.x).
+# Usamos los paquetes nativos de Fedora — más estables e integrados.
+# Si necesitás ROCm 7.x (más nuevo), descomentá el bloque del repo externo abajo.
+info "Instalando ROCm desde repos oficiales de Fedora..."
 
 DNF_ROCM=(
-  rocm-opencl                   # ROCm OpenCL runtime (corre shaders/compute en GPU AMD)
-  rocm-opencl-devel             # Headers OpenCL
-  rocm-hip-runtime              # HIP: plataforma de compute AMD (equivalente a CUDA)
-  rocm-hip-devel                # Headers HIP
-  rocminfo                      # Herramienta para verificar ROCm
-  clinfo                        # Información de dispositivos OpenCL
-  hipblaslt                     # BLAS acelerado por GPU (usado por PyTorch/ML)
+  rocm                          # Metapaquete: instala el stack ROCm completo
+  rocminfo                      # rocminfo — verificar agentes HSA/GPU
+  rocm-smi                      # rocm-smi — monitor de GPU AMD
+  clinfo                        # clinfo — verificar dispositivos OpenCL
+  rocm-opencl-devel             # Headers OpenCL para compilar
+  hip-devel                     # Headers HIP (compute AMD, equivalente a CUDA)
+  hipblas-devel                 # BLAS acelerado por GPU
+  python3-setuptools            # Requerido por el stack ROCm
+  python3-wheel
 )
 dnf install -y "${DNF_ROCM[@]}" || \
-  warn "Algunos paquetes ROCm no se pudieron instalar. Verificá compatibilidad con tu GPU en: https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html"
+  warn "Algunos paquetes ROCm fallaron. Verificá: https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html"
+
+# ── ROCm 7.x via repo externo AMD (OPCIONAL — descomentá si necesitás 7.x) ───
+# Requiere usar el repo de RHEL9/Rocky Linux de AMD, que es compatible con Fedora.
+# ADVERTENCIA: puede tener conflictos con paquetes ROCm ya instalados de Fedora.
+# Usá --allowerasing para resolver conflictos si los hay.
+#
+# info "Habilitando repo ROCm 7.x de AMD (el9)..."
+# cat > /etc/yum.repos.d/rocm-amd.repo <<'ROCMREPO'
+# [ROCm]
+# name=rocm
+# baseurl=https://repo.radeon.com/rocm/el9/latest/main/
+# enabled=1
+# priority=50
+# gpgcheck=1
+# gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+#
+# [AMDGraphics]
+# name=rocmgraphics
+# baseurl=https://repo.radeon.com/graphics/latest/el/9.6/main/x86_64/
+# enabled=1
+# priority=50
+# gpgcheck=1
+# gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+# ROCMREPO
+# dnf install -y rocm rocm-developer-tools hipblas-devel hip-devel rocm-opencl-devel --allowerasing
 
 # Agregar el usuario al grupo 'render' y 'video' (requerido para acceso ROCm/GPU)
 usermod -aG render,video "$REAL_USER"
 log "Usuario $REAL_USER agregado a grupos render y video (necesario para ROCm)"
 
-# Variable de entorno ROCm
-grep -q 'HSA_OVERRIDE_GFX_VERSION' /etc/environment || \
-  echo '# ROCm — descomentá y ajustá si tu GPU no es detectada automáticamente' >> /etc/environment
-echo '# HSA_OVERRIDE_GFX_VERSION=11.0.0' >> /etc/environment  # Ej para RX 7xxx
-echo 'ROC_ENABLE_PRE_VEGA=1' >> /etc/environment               # Compatibilidad GPUs antiguas (Polaris/Vega)
+# Variables de entorno ROCm
+cat >> /etc/environment <<'ROCMENV'
+# ROCm
+# Descomentá y ajustá si tu GPU no es detectada automáticamente por ROCm:
+# HSA_OVERRIDE_GFX_VERSION=11.0.0   # Ej: RX 7600=11.0.0, RX 6700=10.3.0
+ROCMENV
 
 log "ROCm instalado"
 
@@ -151,10 +170,10 @@ log "ROCm instalado"
 info "Instalando soporte WiFi Intel..."
 
 DNF_WIFI=(
-  linux-firmware                # Firmware iwlwifi (si no fue instalado ya arriba)
-  iwl7260-firmware              # Serie 7000
-  iwl8000c-firmware             # Serie 8000/8260/8265
-  iwlax210-firmware             # AX200/AX201/AX210/AX211 (WiFi 6/6E)
+  linux-firmware                # Firmware base (incluye amdgpu + iwlwifi genérico)
+  iwlwifi-mvm-firmware          # Firmware iwlwifi MVM: AX200/AX201/AX210/AX211/9260/9560/8265
+  iwlax2xx-firmware             # Firmware específico serie AX2xx (WiFi 6/6E)
+  iwlwifi-dvm-firmware          # Firmware iwlwifi DVM: tarjetas Intel más antiguas (serie 6000/7000)
   NetworkManager                # Gestor de red (generalmente ya instalado)
   NetworkManager-wifi           # Plugin WiFi para NetworkManager
   NetworkManager-tui            # nmtui — interfaz TUI para configurar red
